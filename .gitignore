@@ -3,3 +3,4 @@ __pycache__/
 .env
 *.duckdb
 Carnet_AI_Engineering.html
+.claude/skills/jour/
