@@ -164,3 +164,35 @@ def test_marque_leader_par_categorie(con):
         cat: max(marques, key=marques.get) for cat, (_, _, _, marques) in g.CATALOGUE.items()
     }
     assert observe == attendu
+
+
+def test_fidelite_marque(con):
+    """Les foyers ont des préférences de marque (modèle Dirichlet) : chaque marque a des
+    non-acheteurs, et ses acheteurs lui consacrent plus que sa PDM (taux de nourriture > PDM).
+
+    Sans préférences par foyer, tout le monde finit par acheter toutes les marques : pénétration
+    proche de 100 %, nourriture ≈ PDM. Recrutement et fidélité (J3) ne mesureraient alors rien.
+    """
+    lignes = con.sql(
+        """
+        WITH t AS (
+            SELECT a.id_foyer, p.categorie, p.marque, a.montant * f.poids AS valeur, f.poids
+            FROM achats a JOIN produits p USING (id_produit) JOIN foyers f USING (id_foyer)
+        ),
+        acheteurs AS (SELECT DISTINCT categorie, marque, id_foyer, poids FROM t)
+        SELECT ac.marque,
+               SUM(ac.poids) / (SELECT SUM(poids) FROM foyers) AS penetration,
+               (SELECT SUM(valeur) FROM t WHERE t.marque = ac.marque)
+                 / (SELECT SUM(valeur) FROM t WHERE t.categorie = ac.categorie) AS pdm,
+               (SELECT SUM(valeur) FROM t WHERE t.marque = ac.marque)
+                 / (SELECT SUM(valeur) FROM t WHERE t.categorie = ac.categorie
+                      AND t.id_foyer IN (SELECT id_foyer FROM acheteurs a2
+                                         WHERE a2.marque = ac.marque)) AS nourriture
+        FROM acheteurs ac
+        GROUP BY ac.categorie, ac.marque
+        """
+    ).fetchall()
+    for marque, penetration, pdm, nourriture in lignes:
+        assert penetration < 0.8, marque
+        # sans préférences, l'écart nourriture - PDM ne dépasse pas ~4 points (mesuré)
+        assert nourriture > pdm + 0.05, marque

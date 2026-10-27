@@ -3,7 +3,6 @@
 Usage : uv run python -m insight_agent.data.generate
 """
 
-import collections
 from datetime import date
 from pathlib import Path
 from typing import get_args
@@ -78,6 +77,11 @@ N_SEMAINES = 104
 ACHATS_PAR_FOYER = 100
 FORME_GAMMA = 1.5
 PART_ENSEIGNE_PRINCIPALE = 0.7  # 70 % des achats sont faits dans l'enseigne principale du foyer
+# part des foyers qui achètent chaque catégorie (les autres n'en achètent jamais)
+PENETRATION_CATEGORIE = {"eaux": 0.85, "ultra_frais": 0.90, "cafe": 0.65, "lessive": 0.80}
+# concentration de la Dirichlet des préférences de marque : plus elle est basse, plus chaque
+# foyer se concentre sur peu de marques (fidélité forte, pénétrations des petites marques basses)
+CONCENTRATION_DIRICHLET = 1.0
 DATE_DEBUT = date(2024, 1, 1)  # un lundi
 DB_PATH = Path("data/panel.duckdb")
 
@@ -140,16 +144,38 @@ def generer_achats(
     intensite = rng.gamma(shape=FORME_GAMMA, scale=ACHATS_PAR_FOYER / FORME_GAMMA, size=N_FOYERS)
     n_achats = rng.poisson(intensite)
     n = n_achats.sum()
-    nb_refs = collections.Counter(p.marque for p in produits)
-    poids = []
-    for p in produits:
-        poids.append(CATALOGUE[p.categorie][3][p.marque] / nb_refs[p.marque])
-    poids = np.array(poids)
-    probas = poids / sum(poids)
-    # ponytail: choix de marque indépendant du foyer (pas de fidélité marque),
-    # à revoir pour le KPI fidélité (J3)
-    ids_produits = rng.choice([p.id_produit for p in produits], size=n, p=probas)
+    foyer_par_achat = np.repeat(np.arange(N_FOYERS), n_achats)  # indice du foyer, 0..N-1
     ids_foyers = np.repeat([f.id_foyer for f in foyers], n_achats)
+
+    # catégories achetées par chaque foyer (au moins une : ses achats doivent avoir une catégorie)
+    categories = list(CATALOGUE)
+    penetrations = [PENETRATION_CATEGORIE[c] for c in categories]
+    achete = rng.random((N_FOYERS, len(categories))) < penetrations
+    aucune = ~achete.any(axis=1)
+    achete[aucune, rng.integers(len(categories), size=aucune.sum())] = True
+    # catégorie de chaque achat : tirage uniforme parmi les catégories du foyer
+    # (score aléatoire mis à 0 pour les catégories non achetées, puis argmax)
+    cat_par_achat = (rng.random((n, len(categories))) * achete[foyer_par_achat]).argmax(axis=1)
+
+    # marque : modèle NBD-Dirichlet (Ehrenberg). Chaque foyer a ses propres préférences de marque,
+    # tirées d'une Dirichlet centrée sur l'attractivité : concentration basse = foyers fidèles à
+    # 1 ou 2 marques, donc des non-acheteurs par marque et une fidélité qui varie selon la marque.
+    # ponytail: préférences fixes sur 2 ans (marché stationnaire) : le recrutement ne vient que du
+    # renouvellement des petits acheteurs ; ajouter une dérive par période pour simuler une tendance
+    ids_produits = np.zeros(n, dtype=np.int64)
+    for c, categorie in enumerate(categories):
+        marques = list(CATALOGUE[categorie][3])
+        attractivite = np.array(list(CATALOGUE[categorie][3].values()), dtype=float)
+        alpha = CONCENTRATION_DIRICHLET * attractivite / attractivite.sum()
+        preferences = rng.dirichlet(alpha, size=N_FOYERS)  # une ligne de probas par foyer
+        dans_c = np.flatnonzero(cat_par_achat == c)
+        cumul = preferences[foyer_par_achat[dans_c]].cumsum(axis=1)
+        idx_marque = (rng.random(len(dans_c))[:, None] > cumul).sum(axis=1)
+        idx_marque = np.minimum(idx_marque, len(marques) - 1)  # cumul flottant < 1 à 1e-16 près
+        for m, marque in enumerate(marques):
+            refs = [p.id_produit for p in produits if p.marque == marque]
+            achats_m = dans_c[idx_marque == m]
+            ids_produits[achats_m] = rng.choice(refs, size=len(achats_m))  # référence au hasard
     # ponytail: une seule enseigne principale par foyer ; passer à 2 (ex. hyper + proxi)
     # si on veut analyser le cumul d'enseignes
     ids_enseignes = [e.id_enseigne for e in enseignes]

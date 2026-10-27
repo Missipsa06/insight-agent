@@ -21,13 +21,14 @@ Architecture cible :
 - RAG : glossaire et notes méthodo (chunking fixe, pas de reranking en v1)
 - Agent : LangGraph, plan → requête → analyse → rapport, avec checkpoints
 - Transverse : évals en CI, guardrails, traces Langfuse, Docker
-- v2 (hors périmètre actuel) : serveur MCP, reranking / recherche hybride, déploiement AWS
+- Déploiement (J11) : AWS serverless — Lambda (image Docker) + Function URL, DuckDB embarqué en lecture seule, LLM via Bedrock (rôle IAM, région UE ; OpenRouter reste pour le dev local), Terraform (state S3), déploiement GitHub Actions via OIDC, alerte AWS Budgets. Pas de Bedrock Knowledge Bases / Agents (ils remplaceraient le cœur du projet), pas de Fargate + ALB ni NAT Gateway (coût fixe à vide). Objectif : infra ≈ 0 €/mois.
+- v2 (hors périmètre actuel) : serveur MCP, reranking / recherche hybride
 
 ## Le cours
 Le repo `ai-engineering-from-scratch` est accessible via `--add-dir ../ai-engineering-from-scratch`.
 Une leçon `X.YY` se trouve dans `phases/<XX>-<nom-phase>/<YY>-<nom-leçon>/` (`docs/en.md` pour le texte, `code/` pour l'implémentation).
 
-## Plan sur 10 jours
+## Plan sur 11 jours
 | Jour | Thème | Leçons | Livrable |
 |---|---|---|---|
 | J1 | Données + setup | 11.01, 11.03 | Dataset panel synthétique DuckDB, schémas Pydantic, Docker, CI lint/tests |
@@ -37,11 +38,13 @@ Une leçon `X.YY` se trouve dans `phases/<XX>-<nom-phase>/<YY>-<nom-leçon>/` (`
 | J5 | Agent | 14.01, 11.16 | Agent LangGraph avec checkpoints |
 | J6 | Golden set | 11.10 | 30 questions métier avec réponses attendues |
 | J7 | Évals | 05.27 | Métriques SQL exact, bons outils, fidélité RAG, coût/latence ; script en CI |
-| J8 | API + UI | 11.13 | FastAPI + Streamlit dockerisés |
+| J8 | API + UI | 11.13 | FastAPI (sans état) + Streamlit dockerisés |
 | J9 | Garde-fous + traces | 11.12 | Langfuse, validation entrées/sorties, plafond de coût |
 | J10 | Packaging | — | README, schéma d'archi, résultats d'évals, démo 2 min |
+| J11 | Déploiement AWS | — | Terraform : Lambda + Function URL + Bedrock + OIDC + budget ; évals J7 relancées après bascule Bedrock |
 
-Si J5 déborde, sacrifier J9 avant les évals.
+Si J5 déborde, sacrifier J9 avant les évals. J11 passe après les évals et le packaging.
+Préparer J11 sans effort supplémentaire : tout appel LLM passe par `llm.py` (y compris le modèle LangGraph au J5), outils KPI en fonctions pures.
 
 ## Mode tuteur — règles de travail
 **Cœur du projet — c'est moi qui écris :** text-to-SQL, outils KPI, retriever, graphe LangGraph, évals.
